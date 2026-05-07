@@ -711,18 +711,15 @@ tbody tr:hover{background:#f8fafc}
     </div>
 
     <!-- Notification Panel -->
-    <div class="notif-panel" id="notif-panel" style="width:380px">
-      <div class="notif-head">
-        <h4>🔔 Notifications <span id="notif-count-badge" style="background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;margin-left:4px;display:none"></span></h4>
-        <div style="display:flex;gap:8px;align-items:center">
-          <button class="notif-mark-all" onclick="markAllRead()">Mark all read</button>
-          <button class="notif-mark-all" onclick="clearAllNotifications()" style="color:#ef4444">Clear all</button>
-        </div>
+    <div class="notif-panel" id="notif-panel">
+      <div class="notif-head"><h4>🔔 Notifications</h4><button class="notif-mark-all" onclick="markAllRead()">Mark all read</button></div>
+      <div class="notif-list">
+        <div class="notif-item unread"><div class="notif-dot2"></div><div><div>AC Unit – Block B is overdue for maintenance</div><div class="notif-time">2 hours ago</div></div></div>
+        <div class="notif-item unread"><div class="notif-dot2"></div><div><div>PO-891 pending MD approval – ₹1.2L</div><div class="notif-time">4 hours ago</div></div></div>
+        <div class="notif-item unread"><div class="notif-dot2"></div><div><div>New vendor Tech Solutions Ltd added</div><div class="notif-time">Yesterday</div></div></div>
+        <div class="notif-item"><div class="notif-dot2 read"></div><div><div>Bulk upload completed – 45 assets imported</div><div class="notif-time">2 days ago</div></div></div>
       </div>
-      <div class="notif-list" id="notif-list-body" style="max-height:420px">
-        <div style="text-align:center;padding:28px;color:var(--muted);font-size:13px">No notifications yet</div>
-      </div>
-      <div class="notif-foot"><button onclick="document.getElementById('notif-panel').classList.remove('open')">Close</button></div>
+      <div class="notif-foot"><button onclick="document.getElementById('notif-panel').classList.remove('open')">View all notifications</button></div>
     </div>
 
     <!-- CONTENT -->
@@ -3152,7 +3149,6 @@ let USERS = [
 ];
 
 let currentUser = null;
-let NOTIFICATIONS = [];
 let qrStream = null;
 let qrAnimFrame = null;
 
@@ -3173,7 +3169,6 @@ function loadFromLocalStorage() {
     if (saved.CIVIL_INSPECTIONS) CIVIL_INSPECTIONS = saved.CIVIL_INSPECTIONS;
     if (saved.MATERIAL_RECEIPTS) MATERIAL_RECEIPTS = saved.MATERIAL_RECEIPTS;
     if (saved.PAYMENTS) PAYMENTS = saved.PAYMENTS;
-    if (saved.NOTIFICATIONS) NOTIFICATIONS = saved.NOTIFICATIONS;
   } catch(e) { console.log('Load error', e); }
 }
 
@@ -3195,7 +3190,6 @@ function saveAllToLocalStorage() {
       CIVIL_INSPECTIONS,
       MATERIAL_RECEIPTS,
       PAYMENTS,
-      NOTIFICATIONS,
       ts: new Date().toISOString() 
     };
     const json = JSON.stringify(data);
@@ -3286,7 +3280,6 @@ function doLogin() {
     renderQuotationSection();
     populatePOVendors();
     updateStorageIndicator();
-    renderNotifications();
   } else {
     document.getElementById('login-err').style.display = 'block';
   }
@@ -3483,22 +3476,12 @@ function submitRequirementJustify() {
   if (score >= 10) {
     req.status = 'MD Review';
     showToast(`🎉 Score ${score}/10 — Perfect! Sent to MD for final approval.`, 'success');
-    // Notify MD
-    addNotification({ toUsers:'md', icon:'📋', title:`New Requirement: ${req.title}`, message:`${req.by} (${req.dept}) submitted RJ with score ${score}/10. ₹${req.budget.toLocaleString('en-IN')} budget. Awaiting your approval.`, type:'info', actionPage:'req-justify', refId:req.id });
-    // Notify submitter
-    addNotification({ toUsers:[currentUser.id], icon:'✅', title:`Requirement Submitted`, message:`Your requirement "${req.title}" (${req.id}) scored ${score}/10 and is now in MD Review queue.`, type:'success', actionPage:'req-justify', refId:req.id });
   } else if (score >= 7) {
     req.status = 'MD Review';
     showToast(`✅ Score ${score}/10 — Qualifies! Sent to MD S. Karthikeyan for review.`, 'info');
-    // Notify MD
-    addNotification({ toUsers:'md', icon:'📋', title:`New Requirement: ${req.title}`, message:`${req.by} (${req.dept}) submitted RJ with score ${score}/10. ₹${req.budget.toLocaleString('en-IN')} budget. Awaiting your approval.`, type:'info', actionPage:'req-justify', refId:req.id });
-    // Notify submitter
-    addNotification({ toUsers:[currentUser.id], icon:'✅', title:`Requirement Submitted`, message:`Your requirement "${req.title}" (${req.id}) scored ${score}/10 and is now in MD Review queue.`, type:'success', actionPage:'req-justify', refId:req.id });
   } else {
     req.status = 'Rejected';
     showToast(`❌ Score ${score}/10 — Below minimum 7/10. Requirement rejected. Improve justification & resubmit.`, 'error');
-    // Notify submitter
-    addNotification({ toUsers:[currentUser.id], icon:'❌', title:`Requirement Rejected (Low Score)`, message:`Your requirement "${req.title}" scored only ${score}/10 (min 7/10). Please improve justification and resubmit.`, type:'error', actionPage:'req-justify', refId:req.id });
   }
 
   saveAllToLocalStorage();
@@ -3576,9 +3559,6 @@ function renderMDQueue() {
 }
 
 function mdApproveReq(id) {
-  if (!currentUser || currentUser.role !== 'System Admin') {
-    showToast('⛔ Only MD (Managing Director) can approve requirements.', 'error'); return;
-  }
   const req = REQUIREMENTS.find(r => r.id === id);
   if (!req) return;
   req.status = 'Quotation';
@@ -3591,15 +3571,9 @@ function mdApproveReq(id) {
   updateReqJustifyStats();
   showToast(`✅ MD Approved ${id}! Now collect 3 vendor quotations.`, 'success');
   setTimeout(() => showToast('📊 3-Vendor Quotation section is now active below.', 'info'), 1500);
-  // Notify all non-MD active users (managers, supervisors, staff who can add quotations)
-  const notifyUsers = USERS.filter(u => u.status === 'Active' && u.id !== currentUser.id).map(u => u.id);
-  addNotification({ toUsers: notifyUsers, icon:'✅', title:`MD Approved: ${id}`, message:`"${req.title}" approved by MD. Please collect 3 vendor quotations and submit for MD quote review.`, type:'success', actionPage:'req-justify', refId:id });
 }
 
 function mdRejectReq(id) {
-  if (!currentUser || currentUser.role !== 'System Admin') {
-    showToast('⛔ Only MD (Managing Director) can reject requirements.', 'error'); return;
-  }
   const req = REQUIREMENTS.find(r => r.id === id);
   if (!req) return;
   const reason = prompt(`MD Rejection Reason for ${id}:\n(Leave blank to cancel)`);
@@ -3613,9 +3587,6 @@ function mdRejectReq(id) {
   renderReqJustifyList();
   updateReqJustifyStats();
   showToast(`❌ ${id} rejected by MD. Reason: ${req.mdRejectedReason}`, 'error');
-  // Notify all active non-MD users
-  const notifyUsers = USERS.filter(u => u.status === 'Active' && u.id !== currentUser.id).map(u => u.id);
-  addNotification({ toUsers: notifyUsers, icon:'❌', title:`MD Rejected: ${id}`, message:`"${req.title}" was rejected by MD. Reason: ${req.mdRejectedReason}`, type:'error', actionPage:'req-justify', refId:id });
 }
 
 // ─── 3-VENDOR QUOTATION ───────────────────────────────────────────────────────
@@ -3872,122 +3843,9 @@ function toggleNotifPanel(e) {
 }
 
 function markAllRead() {
-  NOTIFICATIONS.forEach(n => { if (n.toUser === (currentUser && currentUser.id)) n.read = true; });
-  saveAllToLocalStorage();
-  renderNotifications();
+  document.querySelectorAll('.notif-item.unread').forEach(i => i.classList.remove('unread'));
+  document.getElementById('notif-dot-top').style.display = 'none';
 }
-
-function clearAllNotifications() {
-  NOTIFICATIONS = NOTIFICATIONS.filter(n => n.toUser !== (currentUser && currentUser.id));
-  saveAllToLocalStorage();
-  renderNotifications();
-}
-
-// ─── NOTIFICATION ENGINE ──────────────────────────────────────────────────────
-// Role → User ID mapping helpers
-function getUsersByRole(role) {
-  return USERS.filter(u => u.role === role && u.status === 'Active');
-}
-function getMDUsers() {
-  return getUsersByRole('System Admin');
-}
-function getUserById(id) {
-  return USERS.find(u => u.id === id);
-}
-function getUsersByIds(ids) {
-  return USERS.filter(u => ids.includes(u.id));
-}
-
-// Core: push a notification to one or more users
-// toUsers: array of user IDs  OR 'md' for all MD users  OR 'all'
-function addNotification({ toUsers, icon, title, message, type, actionPage, refId }) {
-  const now = new Date().toISOString();
-  let recipients = [];
-  if (toUsers === 'md') {
-    recipients = getMDUsers().map(u => u.id);
-  } else if (toUsers === 'all') {
-    recipients = USERS.filter(u => u.status === 'Active').map(u => u.id);
-  } else {
-    recipients = Array.isArray(toUsers) ? toUsers : [toUsers];
-  }
-  recipients.forEach(uid => {
-    NOTIFICATIONS.push({
-      id: 'NTF-' + Date.now() + '-' + uid,
-      toUser: uid,
-      icon: icon || '🔔',
-      title: title || 'Notification',
-      message: message || '',
-      type: type || 'info',   // info | success | warning | error
-      read: false,
-      createdAt: now,
-      actionPage: actionPage || null,
-      refId: refId || null,
-      from: currentUser ? currentUser.name : 'System'
-    });
-  });
-  saveAllToLocalStorage();
-  renderNotifications();
-}
-
-function timeAgo(iso) {
-  const diff = Math.floor((Date.now() - new Date(iso)) / 1000);
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return Math.floor(diff/60) + 'm ago';
-  if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
-  return Math.floor(diff/86400) + 'd ago';
-}
-
-function renderNotifications() {
-  const list = document.getElementById('notif-list-body');
-  const dot = document.getElementById('notif-dot-top');
-  const badge = document.getElementById('notif-count-badge');
-  if (!list || !currentUser) return;
-
-  const mine = (NOTIFICATIONS || [])
-    .filter(n => n.toUser === currentUser.id)
-    .sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .slice(0, 30);
-
-  const unread = mine.filter(n => !n.read).length;
-
-  if (dot) dot.style.display = unread > 0 ? 'block' : 'none';
-  if (badge) {
-    badge.style.display = unread > 0 ? 'inline' : 'none';
-    badge.textContent = unread > 9 ? '9+' : unread;
-  }
-
-  if (!mine.length) {
-    list.innerHTML = '<div style="text-align:center;padding:28px;color:var(--muted);font-size:13px">No notifications yet</div>';
-    return;
-  }
-
-  const typeIcon = { info:'🔵', success:'🟢', warning:'🟡', error:'🔴' };
-  list.innerHTML = mine.map(n => {
-    const iconColor = { info:'#1a6fc4', success:'#19a876', warning:'#f59e0b', error:'#ef4444' }[n.type] || '#6b7280';
-    return `<div class="notif-item ${n.read?'':'unread'}" onclick="handleNotifClick('${n.id}',${n.actionPage?`'${n.actionPage}'`:'null'})" style="cursor:pointer">
-      <div class="notif-dot2 ${n.read?'read':''}" style="background:${n.read?'transparent':iconColor};border-color:${n.read?'var(--border)':iconColor}"></div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:${n.read?'500':'700'};color:var(--text);line-height:1.4">
-          ${n.icon} ${n.title}
-        </div>
-        <div style="font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.4">${n.message}</div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-          <span class="notif-time">${timeAgo(n.createdAt)}</span>
-          ${n.from ? `<span style="font-size:10px;color:var(--muted)">• by ${n.from}</span>` : ''}
-          ${n.actionPage ? `<span style="font-size:10px;color:var(--j-teal);font-weight:600">→ View</span>` : ''}
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function handleNotifClick(notifId, page) {
-  const n = (NOTIFICATIONS || []).find(x => x.id === notifId);
-  if (n) { n.read = true; saveAllToLocalStorage(); renderNotifications(); }
-  if (page) navigate(page, null);
-  document.getElementById('notif-panel').classList.remove('open');
-}
-
 
 function showToast(msg, type = 'info') {
   const t = document.createElement('div');
@@ -4095,35 +3953,12 @@ function initDashboard() {
 }
 
 function approvePO(num) {
-  if (!currentUser || currentUser.role !== 'System Admin') {
-    showToast('⛔ Only MD can approve Purchase Orders.', 'error'); return;
-  }
   const p = PURCHASES.find(x => x.num === num);
-  if (p) {
-    p.status = 'Approved';
-    saveAllToLocalStorage();
-    initDashboard();
-    renderPOTable();
-    showToast(`✅ ${num} Approved!`, 'success');
-    // Notify all active non-MD users
-    const notifyUsers = USERS.filter(u => u.status==='Active' && u.id !== currentUser.id).map(u=>u.id);
-    addNotification({ toUsers: notifyUsers, icon:'✅', title:`PO Approved: ${num}`, message:`MD approved ${num} for ${p.vendor} — ₹${parseFloat(p.amount||0).toLocaleString('en-IN')}. You may now proceed to receive materials.`, type:'success', actionPage:'purchase', refId:num });
-  }
+  if (p) { p.status = 'Approved'; saveAllToLocalStorage(); initDashboard(); renderPOTable(); showToast(`✅ ${num} Approved!`, 'success'); }
 }
 function rejectPO(num) {
-  if (!currentUser || currentUser.role !== 'System Admin') {
-    showToast('⛔ Only MD can reject Purchase Orders.', 'error'); return;
-  }
   const p = PURCHASES.find(x => x.num === num);
-  if (p) {
-    p.status = 'Rejected';
-    saveAllToLocalStorage();
-    initDashboard();
-    renderPOTable();
-    showToast(`❌ ${num} Rejected`, 'error');
-    const notifyUsers = USERS.filter(u => u.status==='Active' && u.id !== currentUser.id).map(u=>u.id);
-    addNotification({ toUsers: notifyUsers, icon:'❌', title:`PO Rejected: ${num}`, message:`MD rejected PO ${num} for ${p.vendor}. Please review and re-raise if needed.`, type:'error', actionPage:'purchase', refId:num });
-  }
+  if (p) { p.status = 'Rejected'; saveAllToLocalStorage(); initDashboard(); renderPOTable(); showToast(`❌ ${num} Rejected`, 'error'); }
 }
 
 // ─── ASSET FUNCTIONS ──────────────────────────────────────────────────────────
@@ -4473,8 +4308,7 @@ function handlePO(e) {
     amount: parseFloat(document.getElementById('po-amount').value) || 0,
     date: new Date().toISOString().split('T')[0],
     status: 'Pending',
-    reqLink: document.getElementById('po-req-link').value,
-    createdBy: currentUser ? currentUser.id : null
+    reqLink: document.getElementById('po-req-link').value
   };
   PURCHASES.unshift(po);
   saveAllToLocalStorage();
@@ -4482,11 +4316,6 @@ function handlePO(e) {
   renderPOTable();
   renderPurchaseMaster();
   showToast(`✅ PO ${po.num} created!`, 'success');
-  // Notify MD: new PO needs approval
-  addNotification({ toUsers:'md', icon:'🛒', title:`New PO Created: ${po.num}`, message:`${currentUser ? currentUser.name : 'Staff'} created PO for ${po.vendor} — ₹${po.amount.toLocaleString('en-IN')} (${po.items}). Pending your approval.`, type:'warning', actionPage:'purchase', refId:po.num });
-  // Notify all other active users
-  const others = USERS.filter(u => u.status==='Active' && u.id !== (currentUser&&currentUser.id) && u.role!=='System Admin').map(u=>u.id);
-  if (others.length) addNotification({ toUsers: others, icon:'📄', title:`PO Created: ${po.num}`, message:`PO raised for ${po.vendor} — ${po.items} (₹${po.amount.toLocaleString('en-IN')}). Status: Pending MD Approval.`, type:'info', actionPage:'purchase', refId:po.num });
 }
 
 function populatePOVendors() {
@@ -5066,11 +4895,6 @@ function sendForMDQuoteApproval(reqId) {
   renderReqJustifyList();
   updateReqJustifyStats();
   showToast('🔐 Sent to MD for quote approval! Waiting for MD decision.', 'info');
-  // Notify MD: 3 vendor quotes ready for review
-  const best = quots.reduce((a,b) => parseFloat(a.amount)<parseFloat(b.amount)?a:b);
-  addNotification({ toUsers:'md', icon:'🤝', title:`3-Vendor Quotes Ready: ${reqId}`, message:`"${req.title}" has 3 vendor quotes. Best: ${best.vendor} @ ₹${parseFloat(best.amount).toLocaleString('en-IN')}. Please review and approve.`, type:'warning', actionPage:'req-justify', refId:reqId });
-  // Notify submitter
-  if (currentUser) addNotification({ toUsers:[currentUser.id], icon:'📨', title:`Quotes Sent for MD Approval`, message:`3 vendor quotes for "${req.title}" have been submitted to MD for final approval.`, type:'info', actionPage:'req-justify', refId:reqId });
 }
 
 function renderMDQuoteApprovalQueue() {
@@ -5141,9 +4965,6 @@ function renderMDQuoteApprovalQueue() {
 }
 
 function mdApproveQuote(reqId) {
-  if (!currentUser || currentUser.role !== 'System Admin') {
-    showToast('⛔ Only MD (Managing Director) can approve vendor quotes.', 'error'); return;
-  }
   const req = REQUIREMENTS.find(r => r.id === reqId);
   if (!req) return;
   req.status = 'Quote Approved';
@@ -5155,15 +4976,9 @@ function mdApproveQuote(reqId) {
   updateReqJustifyStats();
   showToast(`✅ MD approved the quote for ${reqId}! Now create PO from the Quotation section.`, 'success');
   setTimeout(() => showToast('🛒 Scroll up to Quotation section → "Create PO from Approved Quote"', 'info'), 1500);
-  // Notify all non-MD users: quote approved, create PO
-  const notifyUsers = USERS.filter(u => u.status === 'Active' && u.id !== currentUser.id).map(u => u.id);
-  addNotification({ toUsers: notifyUsers, icon:'🛒', title:`Quote Approved — Create PO: ${reqId}`, message:`MD approved vendor quotes for "${req.title}". Please proceed to create the Purchase Order now.`, type:'success', actionPage:'req-justify', refId:reqId });
 }
 
 function mdRejectQuote(reqId) {
-  if (!currentUser || currentUser.role !== 'System Admin') {
-    showToast('⛔ Only MD (Managing Director) can reject vendor quotes.', 'error'); return;
-  }
   const req = REQUIREMENTS.find(r => r.id === reqId);
   if (!req) return;
   const reason = prompt(`MD Quote Rejection Reason for ${reqId}:\n(Leave blank to cancel)`);
@@ -5177,9 +4992,6 @@ function mdRejectQuote(reqId) {
   renderReqJustifyList();
   updateReqJustifyStats();
   showToast(`❌ Quote rejected. Returned to quotation phase for re-quoting.`, 'error');
-  // Notify all non-MD users: re-quote needed
-  const notifyUsers = USERS.filter(u => u.status === 'Active' && u.id !== currentUser.id).map(u => u.id);
-  addNotification({ toUsers: notifyUsers, icon:'🔄', title:`Quotes Rejected — Re-quote: ${reqId}`, message:`MD rejected vendor quotes for "${req.title}". Reason: ${req.mdQuoteRejectedReason}. Please collect new quotations.`, type:'error', actionPage:'req-justify', refId:reqId });
 }
 
 // ─── MATERIAL RECEIPT PAGE (dual-flow) ────────────────────────────────────────
@@ -5388,10 +5200,6 @@ function handleMaterialReceipt(e) {
     initDashboard();
     showToast(`✅ MR ${mrId} saved! ${qty} asset(s) added to Asset Master.`, 'success');
     setTimeout(() => showToast(`🗂 Asset Master updated — ${qty} new asset(s) from ${poNum || 'manual entry'}`, 'info'), 1500);
-    // Notify MD + all active users
-    addNotification({ toUsers:'md', icon:'🗂', title:`Material Received: ${mrId}`, message:`${qty} unit(s) of "${items}" from ${vendor} received by ${receivedBy}. Auto-registered as assets in Asset Master.`, type:'success', actionPage:'material-receipt', refId:mrId });
-    const others = USERS.filter(u=>u.status==='Active'&&u.role!=='System Admin'&&u.id!==(currentUser&&currentUser.id)).map(u=>u.id);
-    if (others.length) addNotification({ toUsers: others, icon:'🗂', title:`Assets Added: ${mrId}`, message:`${qty} new asset(s) from ${poNum||'manual'} (${vendor}) added to Asset Master.`, type:'info', actionPage:'material-receipt', refId:mrId });
 
   } else {
     // FLOW B: Create Payment entry
@@ -5433,10 +5241,6 @@ function handleMaterialReceipt(e) {
     initDashboard();
     showToast(`✅ MR ${mrId} saved! Payment ${payment.id} created → MD Approval queue.`, 'success');
     setTimeout(() => showToast('💳 Navigate to Payment Process to track payment status.', 'info'), 1500);
-    // Notify MD: payment needs approval
-    addNotification({ toUsers:'md', icon:'💳', title:`Payment Approval Needed: ${payment.id}`, message:`Material received from ${vendor} (${items}). Invoice ₹${netPayable.toLocaleString('en-IN')} (incl. GST ₹${gstAmt.toLocaleString('en-IN')}, TDS -₹${tdsAmt.toLocaleString('en-IN')}). Awaiting your payment approval.`, type:'warning', actionPage:'payment-process', refId:payment.id });
-    // Notify creator (if not MD)
-    if (currentUser && currentUser.role !== 'System Admin') addNotification({ toUsers:[currentUser.id], icon:'💳', title:`Payment Created: ${payment.id}`, message:`Payment of ₹${netPayable.toLocaleString('en-IN')} for ${vendor} submitted to MD Approval queue.`, type:'info', actionPage:'payment-process', refId:payment.id });
   }
 }
 
